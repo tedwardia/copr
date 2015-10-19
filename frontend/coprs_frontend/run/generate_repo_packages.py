@@ -23,7 +23,7 @@ import sys
 sys.path.append(os.path.dirname(here))
 
 from coprs import app
-from coprs.logic.coprs_logic import CoprsLogic
+from copr import create_client2_from_params
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -44,6 +44,7 @@ RELEASE = 1
 # ----------------------------------------------------------------------------------------------------------------------
 
 log = logging.getLogger(__name__)
+client = create_client2_from_params(FRONTEND_URL)
 
 
 class RepoRpmBuilder(object):
@@ -60,22 +61,33 @@ class RepoRpmBuilder(object):
 
     @property
     def rpm_name(self):
-        version = self.chroot.os_version
         # All Fedora releases except for rawhide has same .repo file
-        if self.chroot.os_release == "fedora" and self.chroot.os_version.isdigit():
+        if self.os_release == "fedora" and self.os_version.isdigit():
             version = "all"
-        return self.RPM_NAME_FORMAT.format(self.user, self.copr, self.chroot.os_release, version)
+        return self.RPM_NAME_FORMAT.format(self.user, self.copr, self.os_release, self.os_version)
+
+    @property
+    def os_release(self):
+        return self.chroot.name.split("-")[0]
+
+    @property
+    def os_version(self):
+        return self.chroot.name.split("-")[1]
+
+    @property
+    def name_release(self):
+        return self.chroot.name[:self.chroot.name.rindex("-")]
 
     @property
     def repo_name(self):
         return "{}-{}-{}-{}.repo"\
-            .format(self.user, self.copr, self.chroot.os_release, self.chroot.os_version)
+            .format(self.user, self.copr, self.os_release, self.os_version)
 
     def has_repo_package(self):
         return os.path.isfile(os.path.join(self.packagesdir, self.rpm_name))
 
     def get_repofile(self):
-        api = "coprs/{}/{}/repo/{}/{}".format(self.user, self.copr, self.chroot.name_release, self.repo_name)
+        api = "coprs/{}/{}/repo/{}/{}".format(self.user, self.copr, self.name_release, self.repo_name)
         url = urljoin(FRONTEND_URL, api)
         r = requests.get(url)
         if r.status_code != 200:
@@ -99,7 +111,7 @@ class RepoRpmBuilder(object):
             "-D",   "pkg_release {}".format(RELEASE),
             "-D",          "user {}".format(self.user),
             "-D",          "copr {}".format(self.copr),
-            "-D",        "chroot {}".format("{}-{}".format(self.chroot.os_release, self.chroot.os_version)),
+            "-D",        "chroot {}".format("{}-{}".format(self.os_release, self.os_version)),
             "-D",      "repofile {}".format("_copr_{}-{}.repo".format(self.user, self.copr)),
         ]
 
@@ -115,7 +127,7 @@ class RepoRpmBuilder(object):
 
 
 def all_coprs():
-    return CoprsLogic.get_all()
+    return list(client.projects.get_list(limit=99999))
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -135,8 +147,9 @@ def prepare_packages_directory():
 
 def unique_chroots(copr):
     d = {}
-    for chroot in copr.active_chroots:
-        d[chroot.name_release] = chroot
+    for chroot in client.project_chroots.get_list(copr):
+        name_release = chroot.name[:chroot.name.rindex("-")]
+        d[name_release] = chroot
     return d.values()
 
 
@@ -146,7 +159,7 @@ def main():
 
     for copr in all_coprs():
         for chroot in unique_chroots(copr):
-            builder = RepoRpmBuilder(user=copr.owner.name, copr=copr.name, chroot=chroot)
+            builder = RepoRpmBuilder(user=copr.owner, copr=copr.name, chroot=chroot)
 
             if builder.has_repo_package():
                 log.info("Skipping {}".format(builder.repo_name))
