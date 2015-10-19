@@ -295,3 +295,14 @@ https://admin.fedoraproject.org/accounts/group/view/{{name}}
   {% endif %}
 
 {% endmacro %}
+
+
+{% macro repo_rpm_href(copr, repo) %}
+{{url_for('coprs_ns.copr_repo_rpm_file',
+username=copr.owner.name,
+coprname=copr.name,
+name_release=repo.name_release,
+rpmfile="copr-repo-{}-1-1.noarch.rpm".format(repo.repo_file.replace(".repo", "")),
+_external=True
+)|fix_url_https_frontend}}
+{% endmacro %}

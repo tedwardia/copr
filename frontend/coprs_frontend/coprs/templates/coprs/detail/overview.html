@@ -1,7 +1,7 @@
 {% extends "coprs/detail.html" %}
 
 {% from "coprs/_coprs_forms.html" import copr_legal_flag_form with context %}
-{% from "_helpers.html" import chroot_to_os_logo, copr_name, build_href, repo_file_href %}
+{% from "_helpers.html" import chroot_to_os_logo, copr_name, build_href, repo_file_href, repo_rpm_href %}
 
 {% set selected_tab = "overview" %}
 
@@ -41,6 +41,7 @@
         <tr>
           <th>Release</th>
           <th>Architectures</th>
+          <th>Quick Enable</th>
           <th>Repo Download </th>
         </tr>
       </thead>
@@ -58,6 +59,11 @@
               {% endif %}
               <small class="text-muted"> ({{ repo.rpm_dl_stat[arch] }})*</small>{% if not loop.last %}, {% endif %}
             {% endfor %}
+          </td>
+          <td>
+            <a class="btn btn-default btn-margin" href="{{ repo_rpm_href(copr, repo) }}">
+              <span class="pficon pficon-save"> {{ repo.name_release_human|capitalize }}</span>
+            </a>
           </td>
           <td class="rightmost">
             <a class="btn btn-default btn-margin" href="{{ repo_file_href(copr, repo) }}">

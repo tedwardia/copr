@@ -734,6 +734,9 @@ def render_generate_repo_file(copr, name_release, repofile):
 
 @coprs_ns.route("/<username>/<coprname>/rpm/<name_release>/<rpmfile>")
 def copr_repo_rpm_file(username, coprname, name_release, rpmfile):
+    rpmsplit = rpmfile.split("-")
+    if rpmsplit[4] == "fedora" and rpmsplit[5].isdigit():
+        rpmfile = "-".join(rpmsplit[:5] + ["all"] + rpmsplit[6:])
     try:
         packages_dir = os.path.join(app.config["DATA_DIR"], "repo-rpm-packages")
         with open(os.path.join(packages_dir, rpmfile), "rb") as rpm:
