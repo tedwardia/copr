@@ -88,6 +88,7 @@ Requires:   python-lockfile
 Requires:   logstash
 Requires:   libappstream-glib-builder >= 0.4.0
 # Requires:   python-plumbum
+Requires:   rpmdevtools
 
 Requires(post): systemd
 Requires(preun): systemd

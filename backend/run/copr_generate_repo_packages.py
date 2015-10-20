@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 # RUN
-#     cd frontend/coprs_frontend
-#     COPR_CONFIG=../config/copr_devel.conf python run/generate_repo_packages.py
+#     cd backend
+#     python run/copr_generate_repo_packages.py -c ./conf/copr-be.local.conf
 
 
 from __future__ import print_function
@@ -21,19 +21,19 @@ from six.moves.urllib.parse import urljoin
 here = os.path.dirname(os.path.realpath(__file__))
 import sys
 sys.path.append(os.path.dirname(here))
+sys.path.append("/usr/share/copr/")
 
-from coprs import app
+from backend.helpers import get_backend_opts
 from copr import create_client2_from_params
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-hostname = app.config["PUBLIC_COPR_HOSTNAME"]
-scheme = "https" if hostname == "copr.fedoraproject.org" else "http"  # Workaround to broken enforce https on fe-dev
+opts = get_backend_opts()
 
-FRONTEND_URL = "{}://{}".format(scheme, hostname)
-FRONTEND_DIR = os.path.dirname(here)
-PACKAGES_DIR = os.path.join(app.config["DATA_DIR"], "repo-rpm-packages")
+FRONTEND_URL = opts.frontend_base_url
+BACKEND_DIR = "/usr/share/copr" if here == "/usr/bin" else os.path.dirname(here)
+RESULTS_DIR = opts.destdir
 RPMBUILD = os.path.join(os.path.expanduser("~"), "rpmbuild")
 LOG_FILE = "/var/log/copr/repo-packages.log"
 
@@ -52,19 +52,12 @@ class RepoRpmBuilder(object):
     RPM_NAME_FORMAT = "copr-repo-{}-{}-{}-{}-1-1.noarch.rpm"
     SPEC_NAME = "copr-repo-package.spec"
 
-    def __init__(self, user, copr, chroot, topdir=RPMBUILD, packagesdir=PACKAGES_DIR):
-        self.user = user                # Name of the user
-        self.copr = copr                # Name of the copr
-        self.chroot = chroot            # MockChroot object
-        self.topdir = topdir            # rpmbuild directory (default $HOME/rpmbuild)
-        self.packagesdir = packagesdir  # Directory where to store the rpm packages
-
-    @property
-    def rpm_name(self):
-        # All Fedora releases except for rawhide has same .repo file
-        if self.os_release == "fedora" and self.os_version.isdigit():
-            version = "all"
-        return self.RPM_NAME_FORMAT.format(self.user, self.copr, self.os_release, self.os_version)
+    def __init__(self, user, copr, chroot, topdir=RPMBUILD, resdir=RESULTS_DIR):
+        self.user = user       # Name of the user
+        self.copr = copr       # Name of the copr
+        self.chroot = chroot   # MockChroot object
+        self.topdir = topdir   # rpmbuild directory (default $HOME/rpmbuild)
+        self.resdir = resdir   # Backend results directory accessible via http
 
     @property
     def os_release(self):
@@ -79,12 +72,24 @@ class RepoRpmBuilder(object):
         return self.chroot.name[:self.chroot.name.rindex("-")]
 
     @property
+    def rpm_name(self):
+        version = self.os_version
+        # All Fedora releases except for rawhide has same .repo file
+        if self.os_release == "fedora" and self.os_version.isdigit():
+            version = "all"
+        return self.RPM_NAME_FORMAT.format(self.user, self.copr, self.os_release, version)
+
+    @property
+    def rpm_dir(self):
+        return os.path.join(self.resdir, self.user, self.copr, "repo-packages")
+
+    @property
     def repo_name(self):
         return "{}-{}-{}-{}.repo"\
             .format(self.user, self.copr, self.os_release, self.os_version)
 
     def has_repo_package(self):
-        return os.path.isfile(os.path.join(self.packagesdir, self.rpm_name))
+        return os.path.isfile(os.path.join(self.rpm_dir, self.rpm_name))
 
     def get_repofile(self):
         api = "coprs/{}/{}/repo/{}/{}".format(self.user, self.copr, self.name_release, self.repo_name)
@@ -96,15 +101,18 @@ class RepoRpmBuilder(object):
 
     def generate_repo_package(self):
 
-        shutil.copyfile(os.path.join(FRONTEND_DIR, "coprs/templates/coprs/", self.SPEC_NAME),
+        shutil.copyfile(os.path.join(BACKEND_DIR, "backend/static/", self.SPEC_NAME),
                         os.path.join(self.topdir, "SPECS", self.SPEC_NAME))
 
         with open(os.path.join(self.topdir, "SOURCES", self.repo_name), "w") as f:
             f.writelines(self.get_repofile())
 
+        if not os.path.exists(self.rpm_dir):
+            os.makedirs(self.rpm_dir)
+
         defines = [
             "-D",       "_topdir {}".format(self.topdir),
-            "-D",       "_rpmdir {}".format(self.packagesdir),
+            "-D",       "_rpmdir {}".format(self.rpm_dir),
             "-D",  "_rpmfilename {}".format(self.rpm_name),
             "-D",      "pkg_name {}".format("copr-repo-{}-{}".format(self.user, self.copr)),
             "-D",   "pkg_version {}".format(VERSION),
@@ -140,11 +148,6 @@ def prepare_rpmbuild_directory():
             os.makedirs(d)
 
 
-def prepare_packages_directory():
-    if not os.path.exists(PACKAGES_DIR):
-        os.makedirs(PACKAGES_DIR)
-
-
 def unique_chroots(copr):
     d = {}
     for chroot in client.project_chroots.get_list(copr):
@@ -155,7 +158,6 @@ def unique_chroots(copr):
 
 def main():
     prepare_rpmbuild_directory()
-    prepare_packages_directory()
 
     for copr in all_coprs():
         for chroot in unique_chroots(copr):
