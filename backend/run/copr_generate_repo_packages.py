@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import logging
 from six.moves.urllib.parse import urljoin
+from copr import create_client2_from_params
 
 here = os.path.dirname(os.path.realpath(__file__))
 import sys
@@ -24,7 +25,7 @@ sys.path.append(os.path.dirname(here))
 sys.path.append("/usr/share/copr/")
 
 from backend.helpers import get_backend_opts
-from copr import create_client2_from_params
+from backend.sign import sign_rpms_in_dir
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -52,12 +53,14 @@ class RepoRpmBuilder(object):
     RPM_NAME_FORMAT = "copr-repo-{}-{}-{}-{}-1-1.noarch.rpm"
     SPEC_NAME = "copr-repo-package.spec"
 
-    def __init__(self, user, copr, chroot, topdir=RPMBUILD, resdir=RESULTS_DIR):
+    def __init__(self, user, copr, chroot, topdir=RPMBUILD, resdir=RESULTS_DIR, opts=opts, log=log):
         self.user = user       # Name of the user
         self.copr = copr       # Name of the copr
         self.chroot = chroot   # MockChroot object
         self.topdir = topdir   # rpmbuild directory (default $HOME/rpmbuild)
         self.resdir = resdir   # Backend results directory accessible via http
+        self.opts = opts
+        self.log = log
 
     @property
     def os_release(self):
@@ -130,6 +133,9 @@ class RepoRpmBuilder(object):
         if process.returncode != 0:
             raise RuntimeError("Failed rpmbuild for: {}\n{}".format(self.repo_name, err))
 
+    def sign(self):
+        sign_rpms_in_dir(self.user, self.copr, self.rpm_dir, self.opts, self.log)
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 
@@ -170,6 +176,7 @@ def main():
             try:
                 builder.generate_repo_package()
                 log.info("Created RPM package for: {}".format(builder.repo_name))
+                builder.sign()
 
             except RuntimeError as e:
                 log.error(e.message)
