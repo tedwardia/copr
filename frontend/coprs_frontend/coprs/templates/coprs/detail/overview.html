@@ -61,12 +61,12 @@
             {% endfor %}
           </td>
           <td>
-            <a class="btn btn-default btn-margin" href="{{ repo_rpm_href(copr, repo) }}">
+            <a class="btn btn-default btn-margin {% if not latest_build %}disabled{% endif %}" href="{{ repo_rpm_href(copr, repo) }}">
               <span class="pficon pficon-save"> {{ repo.name_release_human|capitalize }}</span>
             </a>
           </td>
           <td class="rightmost">
-            <a class="btn btn-default btn-margin" href="{{ repo_file_href(copr, repo) }}">
+            <a class="btn btn-default btn-margin {% if not latest_build %}disabled{% endif %}" href="{{ repo_file_href(copr, repo) }}">
               <span class="pficon pficon-save"> {{ repo.name_release_human|capitalize }}</span>
             </a>
             <small class="text-muted"> ({{ repo.dl_stat }} downloads) </small>
