@@ -41,6 +41,7 @@ Requires: python-setuptools
 Requires: python-six
 Requires: python-requests
 Requires: python-requests-toolbelt
+Requires: python-marshmallow
 
 %description
 COPR is lightweight build system. It allows you to create new project in WebUI,
