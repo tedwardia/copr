@@ -63,6 +63,17 @@ class PackagesLogic(object):
         return package
 
     @classmethod
+    def add_build(cls, package, build, git_hash, version):
+        package_build = models.PackageBuild(
+            package_id=package.id,
+            build_id=build.id,
+            git_hash=git_hash,
+            version=version
+        )
+        db.session.add(package_build)
+        return package_build
+
+    @classmethod
     def exists(cls, copr_id, package_name):
         return (models.Package.query
                 .filter(models.Package.copr_id == copr_id)

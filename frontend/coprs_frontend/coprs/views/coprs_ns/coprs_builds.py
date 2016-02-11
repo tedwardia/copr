@@ -326,42 +326,30 @@ def group_copr_new_build_upload(copr):
     return process_new_build_upload(copr, view, url_on_success)
 
 
-def process_new_build_url(copr, add_view, url_on_success):
+def process_new_build_urls(copr, add_view, url_on_success):
     form = forms.BuildFormUrlFactory(copr.active_chroots)()
 
     if form.validate_on_submit():
-        pkgs = form.pkgs.data.split("\n")
+        pkgs = '\n'.join(form.pkgs.data.split())
 
-        if not pkgs:
-            flask.flash("No builds submitted")
+        build_options = {
+            "enable_net": form.enable_net.data,
+            "timeout": form.timeout.data,
+        }
+
+        try:
+            BuildsLogic.create_new_from_urls(
+                flask.g.user, copr, pkgs,
+                chroot_names=form.selected_chroots,
+                **build_options
+            )
+
+        except (ActionInProgressException, InsufficientRightsException) as e:
+            flask.flash(str(e), "error")
+            db.session.rollback()
         else:
-            # # check which chroots we need
-            # chroots = []
-            # for chroot in copr.active_chroots:
-            #     if chroot.name in form.selected_chroots:
-            #         chroots.append(chroot)
-
-            # build each package as a separate build
-            try:
-                for pkg in pkgs:
-                    build_options = {
-                        "enable_net": form.enable_net.data,
-                        "timeout": form.timeout.data,
-                    }
-                    BuildsLogic.create_new_from_url(
-                        flask.g.user, copr, pkg,
-                        chroot_names=form.selected_chroots,
-                        **build_options
-                    )
-
-            except (ActionInProgressException, InsufficientRightsException) as e:
-                flask.flash(str(e), "error")
-                db.session.rollback()
-            else:
-                for pkg in pkgs:
-                    flask.flash("New build has been created: {}".format(pkg))
-
-                db.session.commit()
+            flask.flash("New build has been created: {}".format(pkgs))
+            db.session.commit()
 
         return flask.redirect(url_on_success)
     else:
@@ -372,7 +360,7 @@ def process_new_build_url(copr, add_view, url_on_success):
 @login_required
 @req_with_copr
 def copr_new_build(copr):
-    return process_new_build_url(
+    return process_new_build_urls(
         copr,
         "coprs_ns.copr_new_build",
         url_on_success=url_for("coprs_ns.copr_builds",
@@ -384,7 +372,7 @@ def copr_new_build(copr):
 @login_required
 @req_with_copr
 def group_copr_new_build(copr):
-    return process_new_build_url(
+    return process_new_build_urls(
         copr,
         "coprs_ns.copr_new_build",
         url_on_success=url_for("coprs_ns.group_copr_builds",

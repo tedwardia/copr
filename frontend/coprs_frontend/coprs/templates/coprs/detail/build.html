@@ -102,9 +102,9 @@
         <dl class="dl-horizontal">
           <dt> Package:</dt>
           <dd>
-            {% if build.package %}
-              <a href="{{ copr_url('coprs_ns.copr_package', copr, package_name=build.package.name) }}">
-                {{ build.package.name }}
+            {% if build.first_package %}
+              <a href="{{ copr_url('coprs_ns.copr_package', copr, package_name=build.first_package.name) }}">
+                {{ build.first_package.name }}
               </a>
             {% else %}
                  -
@@ -112,11 +112,8 @@
           </dd>
           <dt> Version:</dt>
           <dd>
-            {% if build.pkg_version %}
-                {{ build.pkg_version}}
-            {% else %}
-                 -
-            {% endif %}
+		  {% set version = build.get_version(build.first_package) %}
+          {% if version %}{{ version }}{% else %}-{% endif %}
           </dd>
           {{ describe_source(build) }}
         </dl>

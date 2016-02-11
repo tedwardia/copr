@@ -72,37 +72,35 @@ def dist_git_upload_completed():
         build_chroots = BuildsLogic.get_chroots_from_dist_git_task_id(task_id)
         build = build_chroots[0].build
 
-        # Is it OK?
-        if "git_hash" in flask.request.json and "repo_name" in flask.request.json:
-            git_hash = flask.request.json["git_hash"]
-            pkg_name = flask.request.json["pkg_name"]
-            pkg_version = flask.request.json["pkg_version"]
+        try: # TODO: for some reason exceptions raised from here are not logged
+            if "packages" in flask.request.json:
+                pkg_list = flask.request.json["packages"]
 
-            # Now I need to assign a package to this build
-            package = PackagesLogic.get(build.copr.id, pkg_name).first()
-            if not package:
-                package = PackagesLogic.add(build.copr.owner, build.copr, pkg_name)
-                db.session.add(package)
-                db.session.flush()
+                for pkg_dict in pkg_list:
+                    package = PackagesLogic.get(build.copr.id, pkg_dict['name']).first()
+                    if not package:
+                        package = PackagesLogic.add(build.copr.owner, build.copr, pkg_dict['name'])
+                        db.session.add(package)
+                        db.session.flush()
 
-            build.package_id = package.id
-            build.pkg_version = pkg_version
+                    package_build = PackagesLogic.add_build(package, build, pkg_dict['git_hash'], pkg_dict['version'])
+                    db.session.add(package_build)
+                    db.session.flush() # TODO: are these flushes needed?
 
-            for ch in build_chroots:
-                ch.status = helpers.StatusEnum("pending")
-                ch.git_hash = git_hash
+                for ch in build_chroots:
+                    ch.status = helpers.StatusEnum("pending")
+            elif "error" in flask.request.json:
+                error_type = flask.request.json["error"]
 
-        # Failed?
-        elif "error" in flask.request.json:
-            error_type = flask.request.json["error"]
+                try:
+                    build.fail_type = helpers.FailTypeEnum(error_type)
+                except KeyError:
+                    build.fail_type = helpers.FailTypeEnum("unknown_error")
 
-            try:
-                build.fail_type = helpers.FailTypeEnum(error_type)
-            except KeyError:
-                build.fail_type = helpers.FailTypeEnum("unknown_error")
-
-            for ch in build_chroots:
-                ch.status = helpers.StatusEnum("failed")
+                for ch in build_chroots:
+                    ch.status = helpers.StatusEnum("failed")
+        except Exception as e:
+            app.logger.debug(str(e))
 
         # is it the last chroot?
         if not build.has_importing_chroot:
@@ -136,6 +134,16 @@ def waiting():
         try:
             copr = task.build.copr
 
+            packages = []
+            for package_build in task.build.package_builds:
+                package_obj = package_build.package
+                packages.append({
+                    'name':  package_obj.name,
+                    'git_repo': package_obj.dist_git_repo,
+                    'git_hash': package_build.git_hash,
+                    'version':  package_build.version,
+                })
+
             # we are using fake username's here
             if copr.is_a_group_project:
                 user_name = u"@{}".format(copr.group.name)
@@ -155,11 +163,9 @@ def waiting():
                 "memory_reqs": task.build.memory_reqs,
                 "timeout": task.build.timeout,
                 "enable_net": task.build.enable_net,
-                "git_repo": task.build.package.dist_git_repo,
-                "git_hash": task.git_hash,
                 "git_branch": helpers.chroot_to_branch(task.mock_chroot.name),
-                "package_name": task.build.package.name,
-                "package_version": task.build.pkg_version
+
+                "packages": packages,
             }
             copr_chroot = CoprChrootsLogic.get_by_name_safe(task.build.copr, task.mock_chroot.name)
             if copr_chroot:
@@ -229,6 +235,8 @@ def starting_build():
     """
 
     result = {"can_start": False}
+
+    log.info(flask.request.json)
 
     if "build_id" in flask.request.json and "chroot" in flask.request.json:
         build = ComplexLogic.get_build_safe(flask.request.json["build_id"])

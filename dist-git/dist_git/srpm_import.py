@@ -37,7 +37,7 @@ def my_upload_fabric(opts):
     return my_upload
 
 
-def actual_do_git_srpm_import(opts, src_filepath, task, tmp_dir, result):
+def actual_do_git_srpm_import(opts, src_filepath, task, tmp_dir, package, result):
     """
     Function to be invoked through multiprocessing
     :param opts: Bunch object with config
@@ -53,7 +53,7 @@ def actual_do_git_srpm_import(opts, src_filepath, task, tmp_dir, result):
     # which is a default shell on SSH
 
     git_base_url = "ssh://copr-dist-git@localhost/%(module)s"
-    repo_dir = os.path.join(tmp_dir, task.package_name)
+    repo_dir = os.path.join(tmp_dir, package.name)
     log.debug("repo_dir: {}".format(repo_dir))
     # use rpkg for importing the source rpm
     commands = Commands(path=repo_dir,
@@ -68,7 +68,7 @@ def actual_do_git_srpm_import(opts, src_filepath, task, tmp_dir, result):
     # rpkg gets module_name as a basename of git url
     # we use module_name as "username/projectname/package_name"
     # basename is not working here - so I'm setting it manually
-    module = "{}/{}/{}".format(task.user, task.project, task.package_name)
+    module = "{}/{}/{}".format(task.user, task.project, package.name)
     commands.module_name = module
     # rpkg calls upload.cgi script on the dist git server
     # here, I just copy the source files manually with custom function
@@ -98,14 +98,14 @@ def actual_do_git_srpm_import(opts, src_filepath, task, tmp_dir, result):
     result["hash"] = commands.commithash
 
 
-def do_git_srpm_import(opts, src_filepath, task, tmp_dir):
+def do_git_srpm_import(opts, src_filepath, task, tmp_dir, package):
     # should be run in the forked process, see:
     # - https://bugzilla.redhat.com/show_bug.cgi?id=1253335
     # - https://github.com/gitpython-developers/GitPython/issues/304
 
     result_dict = Manager().dict()
     proc = Process(target=actual_do_git_srpm_import,
-                   args=(opts, src_filepath, task, tmp_dir, result_dict))
+                   args=(opts, src_filepath, task, tmp_dir, package, result_dict))
     proc.start()
     proc.join()
     if result_dict.get("hash") is None:

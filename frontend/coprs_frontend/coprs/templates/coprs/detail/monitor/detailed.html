@@ -51,7 +51,10 @@
 
                 <small> {{ build.id }} </small> <br>
                 {{ build_state (build) }}
-                <small class="text-muted"> {{ build.pkg_version }} </small>
+                <small class="text-muted">
+				  {% set version = build.get_version(package) %}
+				  {% if version %}{{ version }}{% else %}-{% endif %}
+				</small>
               </a>
             {% else %}
             -

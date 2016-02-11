@@ -102,12 +102,7 @@ class ActionsLogic(object):
             "chroots": chroots_to_delete
         }
 
-        if build.is_older_results_naming_used:
-            if build.src_pkg_name is None or build.src_pkg_name == "":
-                return
-            data_dict["src_pkg_name"] = build.src_pkg_name
-        else:
-            data_dict["result_dir_name"] = build.result_dir_name
+        data_dict["result_dir_name"] = build.result_dir_name
 
         action = models.Action(
             action_type=helpers.ActionTypeEnum("delete"),

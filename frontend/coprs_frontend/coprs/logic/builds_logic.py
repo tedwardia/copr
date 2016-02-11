@@ -126,12 +126,14 @@ class BuildsLogic(object):
     @classmethod
     def get_copr_builds_list(cls, copr):
         query_select = """
-SELECT build.id, MAX(package.name) AS pkg_name, build.pkg_version, build.submitted_on,
+SELECT build.id, MAX(package.name) AS pkg_name, MAX(package_build.version) AS pkg_version, build.submitted_on,
     MIN(statuses.started_on) AS started_on, MAX(statuses.ended_on) AS ended_on, order_to_status(MIN(statuses.st)) AS status,
     build.canceled, MIN("group".name) AS group_name, MIN(copr.name) as copr_name, MIN("user".username) as owner_name
 FROM build
+LEFT OUTER JOIN package_build
+    ON build.id = package_build.build_id
 LEFT OUTER JOIN package
-    ON build.package_id = package.id
+    ON package_build.package_id = package.id
 LEFT OUTER JOIN (SELECT build_chroot.build_id, started_on, ended_on, status_to_order(status) AS st FROM build_chroot) AS statuses
     ON statuses.build_id=build.id
 LEFT OUTER JOIN copr
@@ -249,26 +251,13 @@ GROUP BY
     @classmethod
     def create_new_from_other_build(cls, user, copr, source_build,
                             chroot_names=None, **build_options):
-        # check which chroots we need
         chroots = []
         for chroot in copr.active_chroots:
             if chroot.name in chroot_names:
                 chroots.append(chroot)
 
-        # I don't want to import anything, just rebuild what's in dist git
-        skip_import = True
-        git_hashes = {}
-        for chroot in source_build.build_chroots:
-            if not chroot.git_hash:
-                # I got an old build from time we didn't use dist git
-                # So I'll submit it as a new build using it's link
-                skip_import = False
-                git_hashes = None
-                flask.flash("This build is not in Dist Git. Trying to import the package again.")
-                break
-            git_hashes[chroot.name] = chroot.git_hash
+        # TODO: pass existing git hashes from PackageBuild so that link can be created somewhere down
 
-        # try:
         build = cls.add(
             user=user,
             pkgs=source_build.pkgs,
@@ -277,11 +266,7 @@ GROUP BY
             source_type=source_build.source_type,
             source_json=source_build.source_json,
             enable_net=build_options.get("enable_net", source_build.enable_net),
-            git_hashes=git_hashes,
             skip_import=skip_import)
-
-        build.package_id = source_build.package_id
-        build.pkg_version = source_build.pkg_version
 
         if user.proven:
             if "timeout" in build_options:
@@ -290,31 +275,30 @@ GROUP BY
         return build
 
     @classmethod
-    def create_new_from_url(cls, user, copr, srpm_url,
+    def create_new_from_urls(cls, user, copr, srpm_urls,
                             chroot_names=None, **build_options):
         """
         :type user: models.User
         :type copr: models.Copr
-
+        :type srpm_urls: str of white-space separated urls
         :type chroot_names: List[str]
 
         :rtype: models.Build
         """
         if chroot_names is None:
-            chroots = [c for c in copr.active_chroots]
+            chroots = [c for c in copr.active_chroots] # TODO: shouldn't this be c.name for c in copr.active_chroots ?
         else:
             chroots = []
             for chroot in copr.active_chroots:
                 if chroot.name in chroot_names:
                     chroots.append(chroot)
 
-        source_type = helpers.BuildSourceEnum("srpm_link")
-        source_json = json.dumps({"url": srpm_url})
+        source_type = helpers.BuildSourceEnum("srpm_links")
+        source_json = json.dumps({"urls": srpm_urls.split()})
 
-        # try:
         build = cls.add(
             user=user,
-            pkgs=srpm_url,
+            pkgs=srpm_urls,
             copr=copr,
             chroots=chroots,
             source_type=source_type,
@@ -352,7 +336,6 @@ GROUP BY
                                   "git_branch": git_branch,
                                   "tito_test": tito_test})
 
-        # try:
         build = cls.add(
             user=user,
             pkgs="",
@@ -393,7 +376,6 @@ GROUP BY
                                   "scm_branch": scm_branch,
                                   "spec": spec})
 
-        # try:
         build = cls.add(
             user=user,
             pkgs="",
@@ -475,15 +457,10 @@ GROUP BY
         if not repos:
             repos = copr.repos
 
-        # todo: eliminate pkgs and this check
-        if " " in pkgs or "\n" in pkgs or "\t" in pkgs or pkgs.strip() != pkgs:
-            raise exceptions.MalformedArgumentException("Trying to create a build using src_pkg "
-                                                        "with bad characters. Forgot to split?")
-
         # just temporary to keep compatibility
         if not source_type or not source_json:
-            source_type = helpers.BuildSourceEnum("srpm_link")
-            source_json = json.dumps({"url":pkgs})
+            source_type = helpers.BuildSourceEnum("srpm_links")
+            source_json = json.dumps({"urls": pkgs.split()})
 
         build = models.Build(
             user=user,
@@ -512,14 +489,10 @@ GROUP BY
             status = StatusEnum("pending")
 
         for chroot in chroots:
-            git_hash = None
-            if git_hashes:
-                git_hash = git_hashes.get(chroot.name)
             buildchroot = models.BuildChroot(
                 build=build,
                 status=status,
-                mock_chroot=chroot,
-                git_hash=git_hash)
+                mock_chroot=chroot)
 
             db.session.add(buildchroot)
 
@@ -551,7 +524,7 @@ GROUP BY
                 build=build,
                 status=status,
                 mock_chroot=chroot,
-                git_hash=None
+                git_hash=None # TODO:
             )
 
             db.session.add(buildchroot)
@@ -769,8 +742,8 @@ class BuildsMonitorLogic(object):
             for ch in copr.active_chroots:
                 # todo: move to ComplexLogic
                 query = (
-                    models.BuildChroot.query.join(models.Build)
-                    .filter(models.Build.package_id == pkg.id)
+                    models.BuildChroot.query.join(models.Build).join(models.PackageBuild)
+                    .filter(models.PackageBuild.package_id == pkg.id)
                     .filter(models.BuildChroot.mock_chroot_id == ch.id)
                     .filter(models.BuildChroot.status != helpers.StatusEnum("canceled")))
                 build = query.order_by(models.BuildChroot.build_id.desc()).first()

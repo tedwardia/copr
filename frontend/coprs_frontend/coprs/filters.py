@@ -136,10 +136,11 @@ def markdown_filter(data):
 
 
 @app.template_filter("pkg_name")
-def parse_package_name(pkg):
-    if pkg is not None:
-        return helpers.parse_package_name(os.path.basename(pkg))
-    return pkg
+def parse_package_name(pkgs):
+    out = ''
+    for pkg in pkgs.split():
+        out += helpers.parse_package_name(os.path.basename(pkg)) + '\n'
+    return out
 
 
 @app.template_filter("basename")

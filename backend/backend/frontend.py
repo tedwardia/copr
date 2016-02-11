@@ -47,7 +47,8 @@ class FrontendClient(object):
                 if i and self.log:
                     self.log.warning("failed to post data to frontend, repeat #{0}".format(i))
                 return self._post_to_frontend(data, url_path)
-            except RequestException:
+            except RequestException as e:
+                self.log.warning(str(e))
                 time.sleep(5)
         else:
             raise RequestException("Failed to post to frontend for {} times".format(max_repeats))

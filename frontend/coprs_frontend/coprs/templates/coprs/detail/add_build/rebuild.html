@@ -29,9 +29,9 @@
     <dl class="dl-horizontal">
       <dt> Package:</dt>
       <dd>
-        {% if build.package %}
-          <a href="{{ package_href(build.package) }}">
-            {{ build.package.name }}
+        {% if build.first_package %}
+          <a href="{{ package_href(build.first_package) }}">
+            {{ build.first_package.name }}
           </a>
         {% else %}
              -
@@ -39,11 +39,8 @@
       </dd>
       <dt> Version:</dt>
       <dd>
-        {% if build.pkg_version %}
-            {{ build.pkg_version}}
-        {% else %}
-             -
-        {% endif %}
+		{% set version = build.get_version(build.first_package) %}
+		{% if version %}{{ version }}{% else %}-{% endif %}
       </dd>
       {{ describe_source(build) }}
     </dl>

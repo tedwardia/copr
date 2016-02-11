@@ -18,6 +18,22 @@ import operator
 from coprs.helpers import BuildSourceEnum, StatusEnum, ActionTypeEnum, JSONEncodedDict
 
 
+class PackageBuild(db.Model, helpers.Serializer):
+    """
+    Represents m:n relationship between package and build
+    """
+
+    __tablename__ = "package_build"
+
+    id = db.Column(db.Integer, primary_key=True)
+    package_id = db.Column(db.Integer, db.ForeignKey("package.id", ondelete="CASCADE"), nullable=False)
+    build_id = db.Column(db.Integer, db.ForeignKey("build.id", ondelete="CASCADE"), nullable=False)
+    package = db.relationship("Package", lazy="joined")
+    build = db.relationship("Build", lazy="joined")
+    git_hash = db.Column(db.Text)
+    version = db.Column(db.Text)
+
+
 class User(db.Model, helpers.Serializer):
 
     """
@@ -361,11 +377,21 @@ class Package(db.Model, helpers.Serializer):
     enable_net = db.Column(db.Boolean, default=False,
                            server_default="0", nullable=False)
 
-    builds = db.relationship("Build", order_by="Build.id")
-
     # relations
     copr_id = db.Column(db.Integer, db.ForeignKey("copr.id"))
-    copr = db.relationship("Copr", backref=db.backref("packages"))
+    copr = db.relationship("Copr", backref=db.backref("packages"), lazy="joined")
+
+    package_builds = db.relationship("PackageBuild", passive_deletes=True)
+
+    _builds = []
+
+    @property
+    def builds(self):
+        if not self._builds:
+            for package_build in self.package_builds:
+                self._builds.append(package_build.build)
+        return self._builds
+
 
     @property
     def dist_git_repo(self):
@@ -410,8 +436,6 @@ class Build(db.Model, helpers.Serializer):
     pkgs = db.Column(db.Text)
     # built packages
     built_packages = db.Column(db.Text)
-    # version of the srpm package got by rpm
-    pkg_version = db.Column(db.Text)
     # was this build canceled by user?
     canceled = db.Column(db.Boolean, default=False)
     # list of space separated additional repos
@@ -444,10 +468,32 @@ class Build(db.Model, helpers.Serializer):
     user = db.relationship("User", backref=db.backref("builds"))
     copr_id = db.Column(db.Integer, db.ForeignKey("copr.id"))
     copr = db.relationship("Copr", backref=db.backref("builds"))
-    package_id = db.Column(db.Integer, db.ForeignKey("package.id"))
-    package = db.relationship("Package")
 
     chroots = association_proxy("build_chroots", "mock_chroot")
+
+    package_builds = db.relationship("PackageBuild", passive_deletes=True)
+
+    _packages = []
+
+    @property
+    def packages(self):
+        if not self._packages:
+            for package_build in self.package_builds:
+                self._packages.append(package_build.package)
+        return self._packages
+
+    @property
+    def first_package(self):
+        if self.packages:
+            return self.packages[0]
+        else:
+            return None
+
+    def get_version(self, package):
+        for pb in self.package_builds:
+            if pb.package_id == package.id:
+                return pb.version
+        return None
 
     @property
     def user_name(self):
@@ -466,12 +512,6 @@ class Build(db.Model, helpers.Serializer):
         return helpers.FailTypeEnum(self.fail_type)
 
     @property
-    def is_older_results_naming_used(self):
-        # we have changed result directory naming together with transition to dist-git
-        # that's why we use so strange criterion
-        return self.build_chroots[0].git_hash is None
-
-    @property
     def repos_list(self):
         if self.repos is None:
             return list()
@@ -480,7 +520,7 @@ class Build(db.Model, helpers.Serializer):
 
     @property
     def result_dir_name(self):
-        return "{:08d}-{}".format(self.id, self.package.name)
+        return "{:08d}-{}".format(self.id, self.packages[0].name if self.packages else 'NOPKGNAME') # TODO: this should be a column in db
 
     @property
     def source_json_dict(self):
@@ -634,26 +674,20 @@ class Build(db.Model, helpers.Serializer):
         return self.state in ["succeeded", "canceled", "skipped"]
 
     @property
-    def src_pkg_name(self):
+    def src_pkg_name(self): # TODO: remove, currently this is only used to get name of remote build directory for delete operation (but the name of the dir should be stored in db)
         """
         Extract source package name from source name or url
         todo: obsolete
         """
         try:
-            src_rpm_name = self.pkgs.split("/")[-1]
+            first_pkg = self.pkgs.split()[0]
+            src_rpm_name = first_pkg.split("/")[-1]
         except:
             return None
         if src_rpm_name.endswith(".src.rpm"):
             return src_rpm_name[:-8]
         else:
             return src_rpm_name
-
-    @property
-    def package_name(self):
-        try:
-            return self.package.name
-        except:
-            return None
 
     def to_dict(self, options=None):
         result = super(Build, self).to_dict(options)
@@ -776,7 +810,6 @@ class BuildChroot(db.Model, helpers.Serializer):
     build_id = db.Column(db.Integer, db.ForeignKey("build.id"),
                          primary_key=True)
     build = db.relationship("Build", backref=db.backref("build_chroots"))
-    git_hash = db.Column(db.String(40))
     status = db.Column(db.Integer, default=StatusEnum("importing"))
 
     started_on = db.Column(db.Integer)
@@ -801,13 +834,6 @@ class BuildChroot(db.Model, helpers.Serializer):
 
         return "unknown"
 
-    @property
-    def dist_git_url(self):
-        if app.config["DIST_GIT_URL"]:
-            return "{}/{}.git/commit/?id={}".format(app.config["DIST_GIT_URL"],
-                                                    self.build.package.dist_git_repo,
-                                                    self.git_hash)
-        return None
 
     @property
     def result_dir_url(self):
@@ -834,10 +860,8 @@ class BuildChroot(db.Model, helpers.Serializer):
             self.build.copr.name,
             self.name,
         ])
-        if self.git_hash is not None and self.build.package:
-            parts.append(self.build.result_dir_name)
-        else:
-            parts.append(self.build.src_pkg_name)
+
+        parts.append(self.build.result_dir_name)
 
         return os.path.join(*parts)
 

@@ -273,6 +273,8 @@ def copr_new_build(copr):
         raise LegacyApiError("Invalid request: user {} is not allowed to build in the copr: {}"
                              .format(flask.g.user.username, copr))
 
+    # TODO: support for multipkg builds
+
     # we're checking authorization above for now
     # and also creating separate build for each package
     pkgs = form.pkgs.data.split("\n")

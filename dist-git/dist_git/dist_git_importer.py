@@ -20,10 +20,52 @@ log = logging.getLogger(__name__)
 
 
 class SourceType:
-    SRPM_LINK = 1
+    SRPM_LINKS = 1
     SRPM_UPLOAD = 2
     GIT_AND_TITO = 3
     MOCK_SCM = 4
+
+
+class Package:
+    def __init__(self, srpm_path):
+        self.name, self.version = self.pkg_name_evr(srpm_path)
+        self.git_hash = None
+
+    def to_dict(self):
+        return {
+            'name': self.name,
+            'version': self.version,
+            'git_hash': self.git_hash,
+        }
+
+    def pkg_name_evr(self, srpm_path):
+        """
+        Queries a package for its name and evr (epoch:version-release)
+        """
+        log.debug("Verifying packagage, getting  name and version.")
+        cmd = ['rpm', '-qp', '--nosignature', '--qf', '%{NAME} %{EPOCH} %{VERSION} %{RELEASE}', srpm_path]
+        try:
+            proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
+            output, error = proc.communicate()
+        except OSError as e:
+            log.error(str(e))
+            raise PackageQueryException(e)
+        if proc.returncode != 0:
+            log.error(error)
+            raise PackageQueryException('Error querying srpm: %s' % error)
+
+        try:
+            name, epoch, version, release = output.split(" ")
+        except ValueError as e:
+            raise PackageQueryException(e)
+
+        # Epoch is an integer or '(none)' if not set
+        if epoch.isdigit():
+            evr = "{}:{}-{}".format(epoch, version, release)
+        else:
+            evr = "{}-{}".format(version, release)
+
+        return name, evr
 
 
 class ImportTask(object):
@@ -38,12 +80,10 @@ class ImportTask(object):
         self.source_json = None
         self.source_data = None
 
-        self.package_name = None
-        self.package_version = None
-        self.git_hash = None
+        self.packages = []
 
-        # For SRPM_LINK and SRPM_UPLOAD
-        self.package_url = None
+        # For SRPM_LINKS and SRPM_UPLOAD
+        self.package_urls = None
 
         # For Git based providers (GIT_AND_TITO)
         self.git_url = None
@@ -59,12 +99,11 @@ class ImportTask(object):
         self.mock_scm_branch = None
         self.mock_spec = None
 
-    @property
-    def reponame(self):
-        if any(x is None for x in [self.user, self.project, self.package_name]):
+    def get_reponame(self, package=None):
+        if any(x is None for x in [self.user, self.project, package.name]):
             return None
         else:
-            return "{}/{}/{}".format(self.user, self.project, self.package_name)
+            return "{}/{}/{}".format(self.user, self.project, package.name)
 
     @staticmethod
     def from_dict(dict_data, opts):
@@ -79,13 +118,13 @@ class ImportTask(object):
         task.source_json = dict_data["source_json"]
         task.source_data = json.loads(dict_data["source_json"])
 
-        if task.source_type == SourceType.SRPM_LINK:
-            task.package_url = json.loads(task.source_json)["url"]
+        if task.source_type == SourceType.SRPM_LINKS:
+            task.package_urls = json.loads(task.source_json)["urls"]
 
         elif task.source_type == SourceType.SRPM_UPLOAD:
             json_tmp = task.source_data["tmp"]
             json_pkg = task.source_data["pkg"]
-            task.package_url = "{}/tmp/{}/{}".format(opts.frontend_base_url, json_tmp, json_pkg)
+            task.package_urls = ["{}/tmp/{}/{}".format(opts.frontend_base_url, json_tmp, json_pkg)]
 
         elif task.source_type == SourceType.GIT_AND_TITO:
             task.git_url = task.source_data["git_url"]
@@ -107,10 +146,7 @@ class ImportTask(object):
     def get_dict_for_frontend(self):
         return {
             "task_id": self.task_id,
-            "pkg_name": self.package_name,
-            "pkg_version": self.package_version,
-            "repo_name": self.reponame,
-            "git_hash": self.git_hash
+            "packages": [package.to_dict() for package in self.packages],
         }
 
 
@@ -118,19 +154,19 @@ class SourceProvider(object):
     """
     Proxy to download sources and save them as SRPM
     """
-    def __init__(self, task, target_path):
+    def __init__(self, task, target_dir):
         """
         :param ImportTask task:
-        :param str target_path:
+        :param str target_dir:
         """
         self.task = task
-        self.target_path = target_path
+        self.target_dir = target_dir
 
-        if task.source_type == SourceType.SRPM_LINK:
-            self.provider = SrpmUrlProvider
+        if task.source_type == SourceType.SRPM_LINKS:
+            self.provider = SrpmUrlsProvider
 
         elif task.source_type == SourceType.SRPM_UPLOAD:
-            self.provider = SrpmUrlProvider
+            self.provider = SrpmUrlsProvider
 
         elif task.source_type == SourceType.GIT_AND_TITO:
             self.provider = GitAndTitoProvider
@@ -141,57 +177,55 @@ class SourceProvider(object):
         else:
             raise PackageImportException("Got unknown source type: {}".format(task.source_type))
 
-    def get_srpm(self):
-        self.provider(self.task, self.target_path).get_srpm()
+    def get_srpms(self):
+        return self.provider(self.task, self.target_dir).get_srpms()
 
 
 class BaseSourceProvider(object):
-    def __init__(self, task, target_path):
+    def __init__(self, task, target_dir):
         self.task = task
-        self.target_path = target_path
+        self.target_dir = target_dir
 
 
 class SrpmBuilderProvider(BaseSourceProvider):
-    def __init__(self, task, target_path):
-        super(SrpmBuilderProvider, self).__init__(task, target_path)
+    def __init__(self, task, target_dir):
+        super(SrpmBuilderProvider, self).__init__(task, target_dir)
         self.tmp = tempfile.mkdtemp()
         self.tmp_dest = tempfile.mkdtemp()
 
     def copy(self):
         # 4. copy srpm to the target destination
-        log.debug("GIT_BUILDER: 4. get srpm path".format(self.task.source_type))
+        log.debug("GIT_BUILDER: 4. get srpm paths")
         dest_files = os.listdir(self.tmp_dest)
         dest_srpms = filter(lambda f: f.endswith(".src.rpm"), dest_files)
-        if len(dest_srpms) == 1:
-            srpm_name = dest_srpms[0]
-        else:
-            log.debug("ERROR :( :( :(")
-            log.debug("git_dir: {}".format(self.git_dir))
-            log.debug("dest_files: {}".format(dest_files))
-            log.debug("dest_srpms: {}".format(dest_srpms))
-            log.debug("")
-            raise SrpmBuilderException(FailTypeEnum("srpm_build_error"))
-        log.debug("   {}".format(srpm_name))
-        shutil.copyfile("{}/{}".format(self.tmp_dest, srpm_name), self.target_path)
+        log.debug("dest_srpms: {}".format(dest_srpms))
+        srpm_paths = []
+        for dest_srpm in dest_srpms:
+            source_path = os.path.join(self.target_dir, os.path.basename(dest_srpm))
+            target_path = os.path.join(self.tmp_dest, os.path.basename(dest_srpm))
+            shutil.copyfile(source_path, target_path)
+            srpm_paths.append(target_path)
+        return srpm_paths
 
 
 class GitProvider(SrpmBuilderProvider):
-    def __init__(self, task, target_path):
+    def __init__(self, task, target_dir):
         """
         :param ImportTask task:
-        :param str target_path:
+        :param str target_dir:
         """
         # task.git_url
         # task.git_branch
-        super(GitProvider, self).__init__(task, target_path)
+        super(GitProvider, self).__init__(task, target_dir)
         self.git_dir = None
 
-    def get_srpm(self):
+    def get_srpms(self):
         self.clone()
         self.checkout()
         self.build()
-        self.copy()
+        srpm_paths = self.copy()
         self.clean()
+        return srpm_paths
 
     def clone(self):
         # 1. clone the repo
@@ -280,7 +314,7 @@ class MockScmProvider(SrpmBuilderProvider):
     """
     Used for MOCK_SCM
     """
-    def get_srpm(self):
+    def get_srpms(self):
         log.debug("Build via Mock")
 
         package_name = os.path.basename(self.task.mock_spec).replace(".spec", "")
@@ -304,7 +338,7 @@ class MockScmProvider(SrpmBuilderProvider):
             log.error(error)
             raise SrpmBuilderException(FailTypeEnum("srpm_build_error"))
 
-        self.copy()
+        return self.copy()
 
     def scm_option_get(self):
         return {
@@ -313,32 +347,40 @@ class MockScmProvider(SrpmBuilderProvider):
         }[self.task.mock_scm_type].format(self.task.mock_scm_url)
 
 
-class SrpmUrlProvider(BaseSourceProvider):
-    def get_srpm(self):
+class SrpmUrlsProvider(BaseSourceProvider):
+    def get_srpms(self):
         """
-        Used for SRPM_LINK and SRPM_UPLOAD
+        Used for SRPM_LINKS and SRPM_UPLOAD
         :param ImportTask task:
-        :param str target_path:
+        :param str target_dir:
         :raises PackageDownloadException:
+        :returns local fs paths to srpms
         """
-        log.debug("download the package")
-        try:
-            r = get(self.task.package_url, stream=True, verify=False)
-        except Exception:
-            raise PackageDownloadException("Unexpected error during URL fetch: {}"
-                                           .format(self.task.package_url))
+        srpm_paths = []
 
-        if 200 <= r.status_code < 400:
+        for pkg_url in self.task.package_urls:
+            log.debug("download the package {}".format(pkg_url))
+
             try:
-                with open(self.target_path, 'wb') as f:
-                    for chunk in r.iter_content(1024):
-                        f.write(chunk)
+                r = get(pkg_url, stream=True, verify=False)
             except Exception:
-                raise PackageDownloadException("Unexpected error during URL retrieval: {}"
-                                               .format(self.task.package_url))
-        else:
-            raise PackageDownloadException("Failed to fetch: {} with HTTP status: {}"
-                                           .format(self.task.package_url, r.status_code))
+                raise PackageDownloadException("Unexpected error during URL fetch: {}"
+                                               .format(pkg_url))
+
+            if 200 <= r.status_code < 400:
+                try:
+                    srpm_path = os.path.join(self.target_dir, os.path.basename(pkg_url))
+                    with open(srpm_path, 'wb') as f:
+                        for chunk in r.iter_content(1024):
+                            f.write(chunk)
+                    srpm_paths.append(srpm_path)
+                except Exception as e:
+                    raise PackageDownloadException("Unexpected error during URL retrieval: {}, {}"
+                                                   .format(pkg_url, str(e)))
+            else:
+                raise PackageDownloadException("Failed to fetch: {} with HTTP status: {}"
+                                               .format(pkg_url, r.status_code))
+        return srpm_paths
 
 
 class DistGitImporter(object):
@@ -359,6 +401,7 @@ class DistGitImporter(object):
             # get the data
             r = get(self.get_url)
             # take the first task
+            log.debug(r.text)
             builds_list = r.json()["builds"]
             if len(builds_list) == 0:
                 log.debug("No new tasks to process")
@@ -368,7 +411,7 @@ class DistGitImporter(object):
             log.exception("Failed acquire new packages for import")
         return
 
-    def git_import_srpm(self, task, filepath):
+    def git_import_srpm(self, task, filepath, package):
         """
         Imports a source rpm file into local dist git.
         Repository name is in the Copr Style: user/project/package
@@ -380,49 +423,21 @@ class DistGitImporter(object):
 
         tmp = tempfile.mkdtemp()
         try:
-            return do_git_srpm_import(self.opts, filepath, task, tmp)
+            return do_git_srpm_import(self.opts, filepath, task, tmp, package)
         finally:
             shutil.rmtree(tmp)
 
     @staticmethod
-    def pkg_name_evr(srpm_path):
-        """
-        Queries a package for its name and evr (epoch:version-release)
-        """
-        log.debug("Verifying packagage, getting  name and version.")
-        cmd = ['rpm', '-qp', '--nosignature', '--qf', '%{NAME} %{EPOCH} %{VERSION} %{RELEASE}', srpm_path]
-        try:
-            proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
-            output, error = proc.communicate()
-        except OSError as e:
-            log.error(str(e))
-            raise PackageQueryException(e)
-        if proc.returncode != 0:
-            log.error(error)
-            raise PackageQueryException('Error querying srpm: %s' % error)
-
-        try:
-            name, epoch, version, release = output.split(" ")
-        except ValueError as e:
-            raise PackageQueryException(e)
-
-        # Epoch is an integer or '(none)' if not set
-        if epoch.isdigit():
-            evr = "{}:{}-{}".format(epoch, version, release)
-        else:
-            evr = "{}-{}".format(version, release)
-
-        return name, evr
-
-    def after_git_import(self):
+    def after_git_import(opts):
         log.debug("refreshing cgit listing")
-        call(["/usr/share/dist-git/cgit_pkg_list.sh", self.opts.cgit_pkg_list_location])
+        call(["/usr/share/dist-git/cgit_pkg_list.sh", opts.cgit_pkg_list_location])
 
     @staticmethod
-    def before_git_import(task):
-        log.debug("make sure repos exist: {}".format(task.reponame))
-        call(["/usr/share/dist-git/git_package.sh", task.reponame])
-        call(["/usr/share/dist-git/git_branch.sh", task.branch, task.reponame])
+    def before_git_import(task, package):
+        reponame = task.get_reponame(package)
+        log.debug("make sure repos exist: {}".format(reponame))
+        call(["/usr/share/dist-git/git_package.sh", reponame])
+        call(["/usr/share/dist-git/git_branch.sh", task.branch, reponame])
 
     def post_back(self, data_dict):
         """
@@ -444,36 +459,39 @@ class DistGitImporter(object):
         """
         :type task: ImportTask
         """
-        log.info("2. Task: {}, importing the package: {}"
-                 .format(task.task_id, task.package_url))
+        log.info("2. Task: {}, importing the packages: {}"
+                 .format(task.task_id, task.package_urls)) # TODO: package_urls for Git/Mock is None
         tmp_root = tempfile.mkdtemp()
-        fetched_srpm_path = os.path.join(tmp_root, "package.src.rpm")
 
         try:
-            SourceProvider(task, fetched_srpm_path).get_srpm()
-            task.package_name, task.package_version = self.pkg_name_evr(fetched_srpm_path)
+            srpm_paths = SourceProvider(task, tmp_root).get_srpms()
 
-            self.before_git_import(task)
-            task.git_hash = self.git_import_srpm(task, fetched_srpm_path)
-            self.after_git_import()
+            for srpm_path in srpm_paths:
+                package = Package(srpm_path)
+
+                self.before_git_import(task, package)
+                package.git_hash = self.git_import_srpm(task, srpm_path, package)
+                self.after_git_import(self.opts)
+
+                task.packages.append(package)
 
             log.debug("sending a response - success")
             self.post_back(task.get_dict_for_frontend())
 
         except PackageImportException:
-            log.exception("send a response - failure during import of: {}".format(task.package_url))
+            log.exception("send a response - failure during import of: {}".format(task.package_urls))
             self.post_back_safe({"task_id": task.task_id, "error": "git_import_failed"})
 
         except PackageDownloadException:
-            log.exception("send a response - failure during download of: {}".format(task.package_url))
+            log.exception("send a response - failure during download of: {}".format(task.package_urls))
             self.post_back_safe({"task_id": task.task_id, "error": "srpm_download_failed"})
 
         except PackageQueryException:
-            log.exception("send a response - failure during query of: {}".format(task.package_url))
+            log.exception("send a response - failure during query of: {}".format(task.package_urls))
             self.post_back_safe({"task_id": task.task_id, "error": "srpm_query_failed"})
 
         except GitException as e:
-            log.exception("send a response - failure during query of: {}".format(task.package_url))
+            log.exception("send a response - failure during query of: {}".format(task.package_urls)) # TODO: package_urls for Git/Mock is None
             log.exception("... due to: {}".format(str(e)))
             self.post_back_safe({"task_id": task.task_id, "error": str(e)})
 

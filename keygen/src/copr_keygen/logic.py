@@ -126,7 +126,7 @@ def create_new_key(
         "--gen-key", out.name
     ]
 
-    log.debug("CMD: {}".format(' '.join(map(str, cmd))))
+    log.info("CMD: {}".format(' '.join(map(str, cmd))))
     try:
         handle = Popen(cmd, stdout=PIPE, stderr=PIPE)
         stdout, stderr = handle.communicate()

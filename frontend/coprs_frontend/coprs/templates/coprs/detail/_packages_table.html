@@ -21,12 +21,9 @@
           <b><a href="{{ copr_url('coprs_ns.copr_package', copr, package_name=package.name) }}">{{ package.name }}</a></b>
         </td>
 
-        <td data-order="{{ build.pkg_version }}">
-          {% if build.pkg_version %}
-            {{ build.pkg_version }}
-          {% else %}
-            -
-          {% endif %}
+		{% set version = build.get_version(package) %}
+        <td data-order="{{ version }}">
+          {% if version %}{{ version }}{% else %}-{% endif %}
         </td>
 
         <td data-order="{{ build.submitted_on }}">
