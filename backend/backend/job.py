@@ -45,29 +45,23 @@ class BuildJob(object):
         self.task_id = None
         self.build_id = None
 
-        self.package_name = None
-        self.package_version = None
+        #self.package_name = None
+        #self.package_version = None
 
-        self.git_repo = None
-        self.git_hash = None
+        #self.git_repo = None
+        #self.git_hash = None
         self.git_branch = None
 
         self.pkg_main_version = None
         self.pkg_epoch = None
         self.pkg_release = None
 
-        # hack
-        pkg = task_data['packages'][0]
-        task_data['package_name'] = pkg['name']
-        task_data['package_version'] = pkg['version']
-        task_data['git_hash'] = pkg['git_hash']
-        task_data['git_repo'] = pkg['git_repo']
+        self.packages = None
 
         # TODO: validate update data, user marshmallow
         for key, val in task_data.items():
             key = str(key)
-            if getattr(self, key, None):
-                setattr(self, key, val)
+            setattr(self, key, val)
 
         self.repos = [r for r in task_data["repos"].split(" ") if r.strip()]
 

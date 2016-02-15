@@ -29,8 +29,8 @@ class Builder(object):
         self._remote_tempdir = self.opts.remote_tempdir
         self._remote_basedir = self.opts.remote_basedir
 
-        self.remote_pkg_path = None
-        self.remote_pkg_name = None
+        self.remote_pkg_paths = []
+        self.remote_pkg_names = []
 
         # if we're at this point we've connected and done stuff on the host
         self.conn = self._create_ans_conn()
@@ -185,34 +185,43 @@ class Builder(object):
         check_for_ans_error(ansible_test_results, self.hostname)
 
     def download_job_pkg_to_builder(self):
-        repo_url = "{}/{}.git".format(self.opts.dist_git_url, self.job.git_repo)
-        self.log.info("Cloning Dist Git repo {}, branch {}, hash {}".format(
-            self.job.git_repo, self.job.git_hash, self.job.git_branch))
-        results = self._run_ansible(
-            "rm -rf /tmp/build_package_repo && "
-            "mkdir /tmp/build_package_repo && "
-            "cd /tmp/build_package_repo && "
-            "git clone {repo_url} && "
-            "cd {pkg_name} && "
-            "git checkout {git_hash} && "
-            "fedpkg-copr --dist {branch} srpm"
-            .format(repo_url=repo_url,
-                    pkg_name=self.job.package_name,
-                    git_hash=self.job.git_hash,
-                    branch=self.job.git_branch))
-
-        # expected output:
-        # ...
-        # Wrote: /tmp/.../copr-ping/copr-ping-1-1.fc21.src.rpm
-
+        self.log.info('fooooooooooooooooo')
+        self.log.info(str(self.job.packages))
+        self.log.info('booooooooooooooooo')
         try:
-            self.remote_pkg_path = list(results["contacted"].values())[0][u"stdout"].split("Wrote: ")[1]
-            self.remote_pkg_name = os.path.basename(self.remote_pkg_path).replace(".src.rpm", "")
-        except Exception:
-            self.log.exception("Failed to obtain srpm from dist-git")
-            raise BuilderError("Failed to obtain srpm from dist-git: ansible results {}".format(results))
+            for package in self.job.packages:
+                repo_url = "{}/{}.git".format(self.opts.dist_git_url, package['git_repo'])
+                self.log.info("Cloning Dist Git repo {}, branch {}, hash {}".format(
+                    package['git_repo'], self.job.git_branch, package['git_hash']))
+                results = self._run_ansible(
+                    "rm -rf /tmp/build_package_repo && "
+                    "mkdir /tmp/build_package_repo && "
+                    "cd /tmp/build_package_repo && "
+                    "git clone {repo_url} && "
+                    "cd {pkg_name} && "
+                    "git checkout {git_hash} && "
+                    "fedpkg-copr --dist {branch} srpm"
+                    .format(repo_url=repo_url,
+                            pkg_name=package['name'],
+                            git_hash=package['git_hash'],
+                            branch=self.job.git_branch))
 
-        self.log.info("Got srpm to build: {}".format(self.remote_pkg_path))
+            # expected output:
+            # ...
+            # Wrote: /tmp/.../copr-ping/copr-ping-1-1.fc21.src.rpm
+
+                try:
+                    remote_pkg_path = list(results["contacted"].values())[0][u"stdout"].split("Wrote: ")[1]
+                    remote_pkg_name = os.path.basename(self.remote_pkg_path).replace(".src.rpm", "")
+                    self.remote_pkg_paths(remote_pkg_path)
+                    self.remote_pkg_names(remote_pkg_name)
+                except Exception:
+                    self.log.exception("Failed to obtain srpm from dist-git")
+                    raise BuilderError("Failed to obtain srpm from dist-git: ansible results {}".format(results))
+        except Exception as e:
+            self.log.error(str(e))
+
+        self.log.info("Got srpms to build: {}".format(str(self.remote_pkg_paths)))
 
     def pre_process_repo_url(self, repo_url):
         """
@@ -249,7 +258,7 @@ class Builder(object):
         for k, v in self.job.mockchain_macros.items():
             mock_opt = "--define={} {}".format(k, v)
             buildcmd += "-m {} ".format(pipes.quote(mock_opt))
-        buildcmd += self.remote_pkg_path
+        buildcmd += ' '.join(self.remote_pkg_paths)
         return buildcmd
 
     def run_build_and_wait(self, buildcmd):

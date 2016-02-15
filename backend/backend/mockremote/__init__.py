@@ -243,7 +243,7 @@ class MockRemote(object):
             # here?
 
     def on_success_build(self):
-        self.log.info("Success building {0}".format(self.job.package_name))
+        self.log.info("Success building {0}".format(' '.join([package.name for package in self.job.packages])))
 
         if self.opts.do_sign:
             self.sign_built_packages()
@@ -298,7 +298,7 @@ class MockRemote(object):
                           .format(build_details, build_stdout))
         except BuilderError as error:
             self.log.exception("builder.build error building pkg `{}`: {}"
-                               .format(self.job.package_name, error))
+                               .format(' '.join([package.name for package in self.job.packages], error))
             raise MockRemoteError("Error occurred during build {}: {}"
                                   .format(self.job, error))
         finally:

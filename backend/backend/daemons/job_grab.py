@@ -156,8 +156,6 @@ class CoprJobGrab(object):
             self.log.exception("Error getting JSON build list from FE {0}".format(e))
             return
 
-        self.log.info(r_json)
-
         if r_json.get("builds"):
             self.log.debug("{0} jobs returned".format(len(r_json["builds"])))
             count = 0

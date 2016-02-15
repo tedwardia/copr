@@ -236,7 +236,7 @@ def starting_build():
 
     result = {"can_start": False}
 
-    log.info(flask.request.json)
+    app.logger.debug(flask.request.json)
 
     if "build_id" in flask.request.json and "chroot" in flask.request.json:
         build = ComplexLogic.get_build_safe(flask.request.json["build_id"])

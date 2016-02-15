@@ -242,13 +242,10 @@ class Worker(multiprocessing.Process):
         if not task:
             return
 
-
-        self.log.info('foooooooooooo')
         try:
             job = BuildJob(task, self.opts)
         except Exception as e: # TODO: maybe better exception handling? There should be so exception handler above us that prints relevant msg to logs
             self.log.error(str(e))
-        self.log.info('baaaaaaaaaaar')
 
         self.update_process_title(suffix="Task: {} chroot: {}, obtained at {}"
                                   .format(job.build_id, job.chroot, str(datetime.now())))
@@ -429,6 +426,10 @@ class Worker(multiprocessing.Process):
         job = self.obtain_job()
         if not job:
             return
+
+        self.log.info('1')
+        self.log.info(job.to_dict())
+        self.log.info('2')
 
         try:
             if not self.starting_build(job):
