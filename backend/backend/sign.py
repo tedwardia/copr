@@ -51,12 +51,12 @@ def get_pubkey(username, projectname, outfile=None):
         if "unknown key:" in stderr:
             raise CoprSignNoKeyError(
                 "There are no gpg keys for user {} in keyring".format(username),
-                return_code=handle.returncode,
+                returncode=handle.returncode,
                 cmd=cmd, stdout=stdout, stderr=stderr)
         raise CoprSignError(
             msg="Failed to get user pubkey\n"
                 "sign stdout: {}\n sign stderr: {}\n".format(stdout, stderr),
-            return_code=handle.returncode,
+            returncode=handle.returncode,
             cmd=cmd, stdout=stdout, stderr=stderr)
 
     if outfile:
@@ -82,7 +82,7 @@ def _sign_one(path, email):
     if handle.returncode != 0:
         err = CoprSignError(
             msg="Failed to sign {} by user {}".format(path, email),
-            return_code=handle.returncode,
+            returncode=handle.returncode,
             cmd=cmd, stdout=stdout, stderr=stderr)
 
         raise err

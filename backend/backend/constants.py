@@ -13,6 +13,8 @@ DEF_DESTDIR = os.getcwd()
 DEF_MACROS = {}
 DEF_BUILDROOT_PKGS = ""
 
+ANSIBLE_BINARY = "ansible2x"
+
 
 DEF_CONSECUTIVE_FAILURE_THRESHOLD = 10
 CONSECUTIVE_FAILURE_REDIS_KEY = "copr:sys:consecutive_build_fails"

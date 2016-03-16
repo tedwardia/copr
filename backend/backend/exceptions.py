@@ -8,17 +8,17 @@ class MockRemoteError(Exception):
 
 
 class BuilderError(MockRemoteError):
-    def __init__(self, msg, return_code=None, stdout=None, stderr=None):
+    def __init__(self, msg, returncode=None, stdout=None, stderr=None):
         super(BuilderError, self).__init__(msg)
 
-        self.return_code = return_code
+        self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
 
     def __str__(self):
         result = "BuildError: {}".format(self.msg)
-        if self.return_code:
-            result += "; return code: {}".format(self.return_code)
+        if self.returncode:
+            result += "; return code: {}".format(self.returncode)
         if self.stdout:
             result += "; stdout: {}".format(self.stdout)
         if self.stderr:
@@ -26,24 +26,7 @@ class BuilderError(MockRemoteError):
         return result
 
 
-class AnsibleResponseError(BuilderError):
-    pass
-
-
 class AnsibleCallError(BuilderError):
-    def __init__(self, msg, cmd, module_name, as_root, **kwargs):
-        self.msg = "{}\n Call cmd: `{}`, module: `{}`, as root: {}".format(
-            msg, cmd, module_name, as_root
-        )
-        super(AnsibleCallError, self).__init__(self.msg, **kwargs)
-        self.call_args = dict(
-            cmd=cmd,
-            module_name=module_name,
-            as_root=as_root,
-        )
-
-
-class BuilderTimeOutError(BuilderError):
     pass
 
 
@@ -58,11 +41,11 @@ class CoprSignError(MockRemoteError):
     """
 
     def __init__(self, msg, cmd=None, stdout=None, stderr=None,
-                 return_code=None):
+                 returncode=None):
 
         super(CoprSignError, self).__init__(msg)
         self.cmd = cmd
-        self.return_code = return_code
+        self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
 
@@ -73,7 +56,7 @@ class CoprSignError(MockRemoteError):
                     "return code {} after invocation of: {} \n"
                     "stderr: {}\n"
                     "stdout: {}\n").format(
-                        self.return_code, self.cmd, self.stdout, self.stderr)
+                        self.returncode, self.cmd, self.stdout, self.stderr)
         return out
 
 
