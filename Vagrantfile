@@ -7,11 +7,12 @@ Vagrant.configure(2) do |config|
   config.vm.define "frontend" do |frontend|
     frontend.vm.box = "fedora/23-cloud-base"
 
+    frontend.vm.network "private_network", ip: "192.168.242.51"
+    
     frontend.vm.network "forwarded_port", guest: 80, host: 5000
 
+    # switched this below private_network since nfs synced folders require a private network...   
     frontend.vm.synced_folder ".", "/vagrant", type: "nfs"
-
-    frontend.vm.network "private_network", ip: "192.168.242.51"
 
     # Update the system
     frontend.vm.provision "shell",
@@ -25,11 +26,19 @@ Vagrant.configure(2) do |config|
     frontend.vm.provision "shell",
       # inline: "sudo dnf -y copr enable msuchy/copr"
       # WORKAROUND: old DNF plugin uses outdated .repo URL
-      inline: "sudo wget https://copr.fedoraproject.org/coprs/msuchy/copr/repo/fedora-21/msuchy-copr-fedora-21.repo -P /etc/yum.repos.d/"
+      inline: "sudo wget https://copr.fedorainfracloud.org/coprs/msuchy/copr/repo/fedora-23/msuchy-copr-fedora-23.repo -P /etc/yum.repos.d/"
+    
+    frontend.vm.provision "shell",
+      inline: "sudo dnf -y copr enable @modularity/modulemd"
+     
 
     # Install build dependencies for Copr Frontend
     frontend.vm.provision "shell",
-      inline: "sudo dnf -y builddep /vagrant/frontend/copr-frontend.spec"
+      inline: "sudo dnf -y builddep /vagrant/frontend/copr-frontend.spec || true"
+
+    # above will fail on install python2-modulemd, so install it via pip instead
+    frontend.vm.provision "shell",
+      inline: "sudo pip install modulemd"
 
     # Remove previous build, if any
     frontend.vm.provision "shell",
@@ -47,7 +56,7 @@ Vagrant.configure(2) do |config|
 
     # Build Copr Frontend
     frontend.vm.provision "shell",
-      inline: "cd /vagrant/frontend/ && tito build --test --rpm --rpmbuild-options='--nocheck'",
+      inline: "cd /vagrant/frontend/ && sudo tito build --test --rpm --rpmbuild-options='--nocheck'",
       run: "always"
 
     # Install the Copr Frontend build
